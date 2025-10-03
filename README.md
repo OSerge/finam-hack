@@ -1,0 +1,2 @@
+# finam-hack
+Finam hackathon
