@@ -7,11 +7,15 @@ import asyncio
 import os
 from typing import Any, Optional
 from dotenv import load_dotenv
+import nest_asyncio
 
 from finam_trade_api import Client, TokenManager
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
+
+# Применяем nest_asyncio для поддержки вложенных event loops
+nest_asyncio.apply()
 
 
 class FinamAPIClientEnhanced:
@@ -224,7 +228,7 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            quotes = await self.client.market_data.get_quotes(symbol)
+            quotes = await self.client.instruments.get_last_quote(symbol)
             return {
                 "status": "success",
                 "quotes": quotes,
@@ -251,7 +255,7 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            orderbook = await self.client.market_data.get_orderbook(symbol, depth)
+            orderbook = await self.client.instruments.get_order_book(symbol)
             return {
                 "status": "success",
                 "orderbook": orderbook,
@@ -287,7 +291,7 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            candles = await self.client.market_data.get_candles(
+            candles = await self.client.instruments.get_bars(
                 symbol, timeframe, start, end
             )
             return {
