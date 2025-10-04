@@ -2,10 +2,13 @@
 Улучшенный клиент для работы с Finam TradeAPI с поддержкой JWT токенов
 Использует библиотеку finam-trade-api для автоматического обновления токенов
 """
-
+import datetime
 import os
 from typing import Any, Optional
 
+from finam_trade_api.account import GetTradesRequest
+
+from app.adapters import FinamAPIClient
 from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
 
@@ -34,6 +37,7 @@ class FinamAPIClientEnhanced:
         # Инициализация TokenManager и Client
         self.token_manager = TokenManager(self.token)
         self.client = Client(self.token_manager)
+        self.finam_client = FinamAPIClient(self.token)
         self._initialized = False
 
     async def _ensure_initialized(self) -> None:
@@ -145,6 +149,7 @@ class FinamAPIClientEnhanced:
         await self._ensure_initialized()
         try:
             portfolio = await self.client.account.get_account_info(account_id)
+            # portfolio = self.finam_client.get_account(account_id)
             return {
                 "status": "success",
                 "portfolio": portfolio,
@@ -156,6 +161,40 @@ class FinamAPIClientEnhanced:
                 "status": "error",
                 "account_id": account_id,
                 "message": f"Ошибка при получении портфеля: {e!s}"
+            }
+
+    async def get_trades(self, account_id: str) -> dict[str, Any]:
+        """
+        Получить список сделок по счету
+
+        Args:
+            account_id: Идентификатор счета
+
+        Returns:
+            Словарь со списком сделок или ошибкой
+        """
+        await self._ensure_initialized()
+        try:
+            end_date = datetime.datetime.now()
+            start_date = end_date - datetime.timedelta(days=7)
+
+            # Format dates as strings (YYYY-MM-DD format)
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            end_date_str = end_date.strftime('%Y-%m-%d')
+            orders = await self.client.account.get_trades(GetTradesRequest(
+                account_id=account_id, start_time=start_date, end_time=end_date))
+            # orders = self.finam_client.get_orders(account_id)
+            return {
+                "status": "success",
+                "trades": orders.trades,
+                "account_id": account_id,
+                "message": f"Найдено заявок: {len(orders) if isinstance(orders, list) else 'неизвестно'}"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "account_id": account_id,
+                "message": f"Ошибка при получении заявок: {e!s}"
             }
 
     async def get_orders(self, account_id: str) -> dict[str, Any]:
@@ -171,6 +210,7 @@ class FinamAPIClientEnhanced:
         await self._ensure_initialized()
         try:
             orders = await self.client.orders.get_orders(account_id)
+            # orders = self.finam_client.get_orders(account_id)
             return {
                 "status": "success",
                 "orders": orders,
@@ -270,11 +310,11 @@ class FinamAPIClientEnhanced:
             }
 
     async def get_candles(
-        self,
-        symbol: str,
-        timeframe: str = "D",
-        start: Optional[str] = None,
-        end: Optional[str] = None
+            self,
+            symbol: str,
+            timeframe: str = "D",
+            start: Optional[str] = None,
+            end: Optional[str] = None
     ) -> dict[str, Any]:
         """
         Получить исторические свечи
@@ -339,4 +379,3 @@ class FinamAPIClientEnhanced:
                 "status": "error",
                 "message": f"Ошибка при получении списка активов: {e!s}"
             }
-

@@ -316,6 +316,32 @@ async def get_finam_candles(
             "message": f"Ошибка при получении свечей: {e!s}"
         }
 
+@mcp.tool()
+async def get_finam_trades(account_id: str) -> dict[str, str | dict | list]:
+    """
+    Получить список сделок по счету
+
+    Args:
+        account_id: Идентификатор счета
+
+    Returns:
+        Словарь со списком заявок:
+        - status: "success" | "error"
+        - orders: Список сделок (если успешно)
+        - account_id: ID счета
+        - message: Сообщение о результате
+    """
+    try:
+        client = await get_client()
+        result = await client.get_trades(account_id=account_id)
+        return result
+    except Exception as e:
+        return {
+            "status": "error",
+            "account_id": account_id,
+            "message": f"Ошибка при получении заявок: {e!s}"
+        }
+
 
 @mcp.tool()
 async def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
