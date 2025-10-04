@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Streamlit веб-интерфейс для AI ассистента трейдера
+Streamlit веб-интерфейс для AI ассистента трейдера с поддержкой MCP tools
 
 Использование:
     poetry run streamlit run src/app/chat_app.py
     streamlit run src/app/chat_app.py
 """
 
+import asyncio
 import json
+from typing import Any
 
 import streamlit as st
 
-from src.app.adapters import FinamAPIClient
-from src.app.core import call_llm, get_settings
+from src.app.core import MCPClient, call_llm_with_tools, get_settings
 
 
-def create_system_prompt() -> str:
+def _old_system_prompt() -> str:
     """Создать системный промпт для AI ассистента"""
     return """Ты - AI ассистент трейдера, работающий с Finam TradeAPI.
 
@@ -35,20 +36,67 @@ def create_system_prompt() -> str:
 
 Отвечай на русском, кратко и по делу."""
 
+def create_system_prompt() -> str:
+    """Создать системный промпт для AI ассистента"""
+    return """Ты - AI ассистент трейдера, работающий с Finam TradeAPI.
 
-def extract_api_request(text: str) -> tuple[str | None, str | None]:
-    """Извлечь API запрос из ответа LLM"""
-    if "API_REQUEST:" not in text:
-        return None, None
+У тебя есть доступ к различным инструментам для работы с биржевыми данными:
+- Получение котировок и стаканов заявок
+- Просмотр портфеля и счетов
+- Поиск инструментов
+- Получение исторических данных (свечей)
+- Просмотр активных заявок
 
-    lines = text.split("\n")
-    for line in lines:
-        if line.strip().startswith("API_REQUEST:"):
-            request = line.replace("API_REQUEST:", "").strip()
-            parts = request.split(maxsplit=1)
-            if len(parts) == 2:
-                return parts[0], parts[1]
-    return None, None
+Используй доступные инструменты для получения актуальной информации.
+Отвечай на русском языке, кратко и по делу.
+Анализируй полученные данные и давай полезные инсайты."""
+
+
+async def execute_tool_calls(
+    mcp_url: str,
+    tool_calls: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Выполнить вызовы инструментов через MCP клиент
+    
+    Args:
+        mcp_url: URL MCP сервера
+        tool_calls: Список вызовов инструментов от LLM
+        
+    Returns:
+        Список результатов выполнения
+    """
+    results = []
+    
+    async with MCPClient(base_url=mcp_url) as client:
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+            
+            try:
+                if isinstance(tool_call["function"]["arguments"], str):
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                else:
+                    arguments = tool_call["function"]["arguments"]
+            except json.JSONDecodeError:
+                arguments = {}
+            
+            try:
+                result = await client.call_tool(tool_name, arguments)
+                results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps(result, ensure_ascii=False)
+                })
+            except Exception as e:
+                results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps({"error": str(e)}, ensure_ascii=False)
+                })
+    
+    return results
 
 
 def main() -> None:  # noqa: C901
@@ -57,7 +105,7 @@ def main() -> None:  # noqa: C901
 
     # Заголовок
     st.title("🤖 AI Ассистент Трейдера")
-    st.caption("Интеллектуальный помощник для работы с Finam TradeAPI")
+    st.caption("Интеллектуальный помощник с доступом к Finam TradeAPI через MCP")
 
     # Sidebar с настройками
     with st.sidebar:
@@ -65,19 +113,16 @@ def main() -> None:  # noqa: C901
         settings = get_settings()
         st.info(f"**Модель:** {settings.openrouter_model}")
 
-        # Finam API настройки
-        with st.expander("🔑 Finam API", expanded=False):
-            api_token = st.text_input(
-                "Access Token",
-                type="password",
-                help="Токен доступа к Finam TradeAPI (или используйте FINAM_ACCESS_TOKEN)",
+        with st.expander("🔌 MCP Сервер", expanded=False):
+            mcp_url = st.text_input(
+                "MCP Server URL",
+                value="http://mcp-server:8765",
+                help="URL MCP сервера (в Docker: mcp-server:8765, локально: localhost:8765)"
             )
-            api_base_url = st.text_input("API Base URL", value="https://api.finam.ru", help="Базовый URL API")
-
-        account_id = st.text_input("ID счета", value="", help="Оставьте пустым если не требуется")
 
         if st.button("🔄 Очистить историю"):
             st.session_state.messages = []
+            st.session_state.tools_loaded = False
             st.rerun()
 
         st.markdown("---")
@@ -86,39 +131,65 @@ def main() -> None:  # noqa: C901
         - Какая цена Сбербанка?
         - Покажи мой портфель
         - Что в стакане по Газпрому?
-        - Покажи свечи YNDX за последние дни
+        - Найди инструменты по запросу YNDX
+        - Покажи свечи SBER за последние дни
         - Какие у меня активные ордера?
-        - Детали моей сессии
+        - Список всех доступных инструментов
         """)
 
-    # Инициализация состояния
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    
+    if "tools_loaded" not in st.session_state:
+        st.session_state.tools_loaded = False
+        st.session_state.tools = []
 
-    # Инициализация Finam API клиента
-    finam_client = FinamAPIClient(access_token=api_token or None, base_url=api_base_url if api_base_url else None)
+    # Загрузка tools при первом запуске
+    if not st.session_state.tools_loaded:
+        with st.spinner("🔄 Загрузка инструментов из MCP сервера..."):
+            try:
+                async def load_tools():
+                    async with MCPClient(base_url=mcp_url) as client:
+                        return await client.get_openai_tools()
+                
+                tools = asyncio.run(load_tools())
+                st.session_state.tools = tools
+                st.session_state.tools_loaded = True
+                st.sidebar.success(f"✅ Загружено {len(tools)} инструментов")
+            except Exception as e:
+                st.sidebar.error(f"❌ Ошибка подключения к MCP серверу: {e}")
+                st.sidebar.info("💡 Убедитесь, что MCP сервер запущен")
 
-    # Проверка токена
-    if not finam_client.access_token:
-        st.sidebar.warning(
-            "⚠️ Finam API токен не установлен. Установите в переменной окружения FINAM_ACCESS_TOKEN или введите выше."
-        )
-    else:
-        st.sidebar.success("✅ Finam API токен установлен")
+    # Отображение доступных инструментов
+    if st.session_state.tools_loaded and st.sidebar.checkbox("📋 Показать доступные инструменты", value=False):
+        with st.sidebar.expander("🛠️ Доступные инструменты", expanded=True):
+            for tool in st.session_state.tools:
+                func = tool["function"]
+                st.markdown(f"**{func['name']}**")
+                st.caption(func.get("description", "Нет описания"))
 
     # Отображение истории сообщений
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-            # Показываем API запросы
-            if "api_request" in message:
-                with st.expander("🔍 API запрос"):
-                    st.code(f"{message['api_request']['method']} {message['api_request']['path']}", language="http")
-                    st.json(message["api_request"]["response"])
+            # Показываем вызовы инструментов
+            if "tool_calls" in message and message["tool_calls"]:
+                with st.expander("🔧 Вызовы инструментов"):
+                    for tc in message["tool_calls"]:
+                        func_name = tc["function"]["name"]
+                        try:
+                            args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+                            st.code(f"{func_name}({json.dumps(args, ensure_ascii=False, indent=2)})", language="python")
+                        except:
+                            st.code(f"{func_name}(...)", language="python")
 
     # Поле ввода
     if prompt := st.chat_input("Напишите ваш вопрос..."):
+        if not st.session_state.tools_loaded:
+            st.error("❌ Инструменты не загружены. Проверьте подключение к MCP серверу.")
+            return
+
         # Добавляем сообщение пользователя
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -127,62 +198,88 @@ def main() -> None:  # noqa: C901
         # Формируем историю для LLM
         conversation_history = [{"role": "system", "content": create_system_prompt()}]
         for msg in st.session_state.messages:
-            conversation_history.append({"role": msg["role"], "content": msg["content"]})
+            # Добавляем только основные поля для истории
+            history_msg = {"role": msg["role"], "content": msg["content"]}
+            
+            # Для assistant с tool_calls добавляем их
+            if msg["role"] == "assistant" and "tool_calls" in msg:
+                history_msg["tool_calls"] = msg["tool_calls"]
+            
+            conversation_history.append(history_msg)
 
         # Получаем ответ от ассистента
         with st.chat_message("assistant"), st.spinner("Думаю..."):
             try:
-                response = call_llm(conversation_history, temperature=0.3)
-                assistant_message = response["choices"][0]["message"]["content"]
-
-                # Проверяем API запрос
-                method, path = extract_api_request(assistant_message)
-
-                api_data = None
-                if method and path:
-                    # Подставляем account_id если есть
-                    if account_id and "{account_id}" in path:  # noqa: RUF027
-                        path = path.replace("{account_id}", account_id)
-
-                    # Показываем что делаем запрос
-                    st.info(f"🔍 Выполняю запрос: `{method} {path}`")
-
-                    # Выполняем API запрос
-                    api_response = finam_client.execute_request(method, path)
-
-                    # Проверяем на ошибки
-                    if "error" in api_response:
-                        st.error(f"⚠️ Ошибка API: {api_response.get('error')}")
-                        if "details" in api_response:
-                            st.error(f"Детали: {api_response['details']}")
-
-                    # Показываем результат
-                    with st.expander("📡 Ответ API", expanded=False):
-                        st.json(api_response)
-
-                    api_data = {"method": method, "path": path, "response": api_response}
-
-                    # Добавляем результат в контекст
-                    conversation_history.append({"role": "assistant", "content": assistant_message})
-                    conversation_history.append({
-                        "role": "user",
-                        "content": f"Результат API: {json.dumps(api_response, ensure_ascii=False)}\n\nПроанализируй.",
-                    })
-
-                    # Получаем финальный ответ
-                    response = call_llm(conversation_history, temperature=0.3)
-                    assistant_message = response["choices"][0]["message"]["content"]
-
-                st.markdown(assistant_message)
-
-                # Сохраняем сообщение ассистента
-                message_data = {"role": "assistant", "content": assistant_message}
-                if api_data:
-                    message_data["api_request"] = api_data
-                st.session_state.messages.append(message_data)
+                max_iterations = 5
+                iteration = 0
+                
+                while iteration < max_iterations:
+                    iteration += 1
+                    
+                    # Вызываем LLM с tools
+                    response = call_llm_with_tools(
+                        conversation_history, 
+                        st.session_state.tools,
+                        temperature=0.3
+                    )
+                    
+                    assistant_message = response["choices"][0]["message"]
+                    
+                    # Проверяем наличие tool_calls
+                    if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
+                        # Показываем что выполняем инструменты
+                        tool_names = [tc["function"]["name"] for tc in assistant_message["tool_calls"]]
+                        st.info(f"🔧 Выполняю: {', '.join(tool_names)}")
+                        
+                        # Выполняем tool calls
+                        tool_results = asyncio.run(
+                            execute_tool_calls(mcp_url, assistant_message["tool_calls"])
+                        )
+                        
+                        # Показываем результаты
+                        with st.expander("📊 Результаты инструментов", expanded=False):
+                            for result in tool_results:
+                                st.markdown(f"**{result['name']}:**")
+                                try:
+                                    result_data = json.loads(result["content"])
+                                    st.json(result_data)
+                                except:
+                                    st.text(result["content"])
+                        
+                        # Добавляем в историю
+                        conversation_history.append({
+                            "role": "assistant",
+                            "content": assistant_message.get("content") or "",
+                            "tool_calls": assistant_message["tool_calls"]
+                        })
+                        
+                        for result in tool_results:
+                            conversation_history.append(result)
+                        
+                        # Продолжаем цикл для получения финального ответа
+                        continue
+                    
+                    # Если нет tool_calls, значит получили финальный ответ
+                    final_content = assistant_message.get("content", "")
+                    
+                    if final_content:
+                        st.markdown(final_content)
+                        
+                        # Сохраняем сообщение ассистента
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": final_content
+                        })
+                    
+                    break
+                
+                if iteration >= max_iterations:
+                    st.warning("⚠️ Достигнуто максимальное количество итераций")
 
             except Exception as e:
                 st.error(f"❌ Ошибка: {e}")
+                if settings.debug:
+                    st.exception(e)
 
 
 if __name__ == "__main__":

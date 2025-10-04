@@ -20,9 +20,6 @@ RUN pip install --no-cache-dir poetry==1.8.3 && \
 
 # Копируем исходный код приложения
 COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY data/ ./data/
-COPY README.md .
 
 # Создаем непривилегированного пользователя
 RUN useradd -m -u 1000 appuser && \

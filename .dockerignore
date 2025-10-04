@@ -20,13 +20,3 @@ coverage.xml
 *.cover
 .hypothesis/
 
-# Игнорируем всё кроме необходимых файлов для MCP сервера
-src/app/core/
-src/app/interfaces/
-src/mcp_server/tests/
-src/mcp_server/README.md
-
-# Игнорируем скрипты и другие файлы
-scripts/
-tests/
-case_baseline/
