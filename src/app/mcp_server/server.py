@@ -4,6 +4,7 @@
 
 import os
 import requests
+from typing import Optional
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -13,6 +14,30 @@ from ..adapters.finam_client_enhanced import FinamAPIClientEnhanced
 load_dotenv()
 
 mcp = FastMCP("Finam Trader MCP Server")
+
+
+class State:
+    """Состояние MCP сервера для хранения клиента и токена"""
+
+    def __init__(self):
+        self.finam_client: Optional[FinamAPIClientEnhanced] = None
+        self.jwt_token: Optional[str] = None
+
+
+# Инициализируем состояние сервера
+mcp.state = State()
+
+
+def get_client() -> FinamAPIClientEnhanced:
+    """
+    Получить или создать клиент Finam API
+
+    Returns:
+        Экземпляр FinamAPIClientEnhanced
+    """
+    if mcp.state.finam_client is None:
+        mcp.state.finam_client = FinamAPIClientEnhanced()
+    return mcp.state.finam_client
 
 
 @mcp.tool()
@@ -73,8 +98,15 @@ def get_jwt_token_details() -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_jwt_token_details_sync()
+
+        # Сохраняем JWT токен в состоянии если успешно
+        if result.get("status") == "success" and "token_details" in result:
+            # Получаем JWT токен из клиента
+            if hasattr(client.client, 'access_tokens') and hasattr(client.client.access_tokens, 'jwt_token'):
+                mcp.state.jwt_token = client.client.access_tokens.jwt_token
+
         return result
     except Exception as e:
         return {
@@ -94,8 +126,14 @@ def refresh_jwt_token() -> dict[str, str]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.refresh_jwt_token_sync()
+
+        # Сохраняем обновленный JWT токен в состоянии если успешно
+        if result.get("status") == "success":
+            if hasattr(client.client, 'access_tokens') and hasattr(client.client.access_tokens, 'jwt_token'):
+                mcp.state.jwt_token = client.client.access_tokens.jwt_token
+
         return result
     except Exception as e:
         return {
@@ -116,7 +154,7 @@ def get_finam_accounts() -> dict[str, str | list | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_accounts_sync()
         return result
     except Exception as e:
@@ -142,7 +180,7 @@ def get_finam_portfolio(account_id: str) -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_portfolio_sync(account_id)
         return result
     except Exception as e:
@@ -169,7 +207,7 @@ def get_finam_quotes(symbol: str) -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_quotes_sync(symbol)
         return result
     except Exception as e:
@@ -196,7 +234,7 @@ def search_finam_instruments(query: str = "") -> dict[str, str | list | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_instruments_sync(query)
         return result
     except Exception as e:
@@ -225,7 +263,7 @@ def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | 
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_orderbook_sync(symbol, depth)
         return result
     except Exception as e:
@@ -239,9 +277,9 @@ def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | 
 
 @mcp.tool()
 def get_finam_candles(
-    symbol: str, 
-    timeframe: str = "D", 
-    start: str | None = None, 
+    symbol: str,
+    timeframe: str = "D",
+    start: str | None = None,
     end: str | None = None
 ) -> dict[str, str | dict | list]:
     """
@@ -262,7 +300,7 @@ def get_finam_candles(
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_candles_sync(symbol, timeframe, start, end)
         return result
     except Exception as e:
@@ -290,7 +328,7 @@ def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
         - message: Сообщение о результате
     """
     try:
-        client = FinamAPIClientEnhanced()
+        client = get_client()
         result = client.get_orders_sync(account_id)
         return result
     except Exception as e:
