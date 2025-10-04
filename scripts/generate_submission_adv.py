@@ -274,6 +274,7 @@ async def generate_api_call_with_mcp(
                 tools,
                 temperature=0.0,
                 max_tokens=500
+                # include_reasoning uses OPENROUTER_INCLUDE_REASONING from .env
             )
 
             # Считаем стоимость
