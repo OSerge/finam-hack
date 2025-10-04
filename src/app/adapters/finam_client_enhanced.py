@@ -94,10 +94,10 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            accounts = await self.client.accounts.get_accounts()
+            accounts = await self.client.access_tokens.get_jwt_token_details()
             return {
                 "status": "success",
-                "accounts": accounts,
+                "accounts": accounts.account_ids,
                 "message": f"Найдено счетов: {len(accounts) if isinstance(accounts, list) else 'неизвестно'}"
             }
         except Exception as e:
@@ -118,7 +118,7 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            account_info = await self.client.accounts.get_account_info(account_id)
+            account_info = await self.client.account.get_account_info(account_id)
             return {
                 "status": "success",
                 "account_info": account_info,
@@ -144,11 +144,11 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            portfolio = await self.client.accounts.get_portfolio(account_id)
+            portfolio = await self.client.account.get_account_info(account_id)
             return {
                 "status": "success",
                 "portfolio": portfolio,
-                "account_id": account_id,
+                "account_id": portfolio.account_id,
                 "message": "Портфель получен успешно"
             }
         except Exception as e:
