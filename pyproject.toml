@@ -32,7 +32,7 @@ generate-submission = "scripts.generate_submission:main"
 calculate-metrics = "scripts.calculate_metrics:main"
 evaluate = "scripts.evaluate:evaluate"
 chat-cli = "src.app.interfaces.chat_cli:main"
-mcp-server = "src.app.mcp_server.server:main"
+mcp-server = "src.mcp_server.server:main"
 
 [build-system]
 requires = ["poetry-core"]

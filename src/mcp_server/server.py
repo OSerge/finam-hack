@@ -9,7 +9,7 @@ import httpx
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from ..adapters.finam_client_enhanced import FinamAPIClientEnhanced
+from app.adapters.finam_client_enhanced import FinamAPIClientEnhanced
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()

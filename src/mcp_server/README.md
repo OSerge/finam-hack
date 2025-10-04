@@ -9,7 +9,7 @@ MCP-сервер для работы с Finam TradeAPI через HTTP тран�
 poetry run mcp-server
 
 # Или напрямую
-poetry run python -m src.app.mcp_server.server
+poetry run python -m src.mcp_server.server
 ```
 
 ## 🔧 Настройка в Cursor IDE

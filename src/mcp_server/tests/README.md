@@ -20,10 +20,10 @@
 
 ```bash
 # Все тесты
-poetry run pytest src/app/mcp_server/tests/test_real_api.py -v
+poetry run pytest src/mcp_server/tests/test_real_api.py -v
 
 # Конкретный тест
-poetry run pytest src/app/mcp_server/tests/test_real_api.py::TestRealAPIWithAccounts::test_get_portfolio -v -s
+poetry run pytest src/mcp_server/tests/test_real_api.py::TestRealAPIWithAccounts::test_get_portfolio -v -s
 ```
 
 ## Требования
@@ -43,7 +43,7 @@ poetry install
 
 ```bash
 cd /home/serge/Dev/finam-hack
-poetry run python -m src.app.mcp_server.server
+poetry run python -m src.mcp_server.server
 ```
 
 ## Настройка переменных окружения
