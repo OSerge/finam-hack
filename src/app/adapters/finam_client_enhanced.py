@@ -4,10 +4,13 @@
 """
 
 import os
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
+import httpx
 from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
+from finam_trade_api.instruments.model import BarsRequest, TimeFrame
 
 load_dotenv()
 
@@ -35,6 +38,9 @@ class FinamAPIClientEnhanced:
         self.token_manager = TokenManager(self.token)
         self.client = Client(self.token_manager)
         self._initialized = False
+        
+        # Базовый URL для прямых HTTP запросов
+        self.api_base_url = os.getenv("FINAM_API_BASE_URL", "https://api.finam.ru")
 
     async def _ensure_initialized(self) -> None:
         """
@@ -87,23 +93,35 @@ class FinamAPIClientEnhanced:
 
     async def get_accounts(self) -> dict[str, Any]:
         """
-        Получить список доступных счетов
+        Получить список доступных ID счетов
+        
+        Note: finam-trade-api не предоставляет прямого метода для получения списка счетов.
+        Возвращаем ID из переменной окружения FINAM_DEMO_ACCOUNT_ID.
+        Для получения детальной информации используйте get_account_info(account_id).
         
         Returns:
-            Словарь со списком счетов или ошибкой
+            Словарь со списком ID счетов
         """
         await self._ensure_initialized()
         try:
-            accounts = await self.client.accounts.get_accounts()
-            return {
-                "status": "success",
-                "accounts": accounts,
-                "message": f"Найдено счетов: {len(accounts) if isinstance(accounts, list) else 'неизвестно'}"
-            }
+            import os
+            demo_account_id = os.getenv("FINAM_DEMO_ACCOUNT_ID")
+            
+            if demo_account_id:
+                return {
+                    "status": "success",
+                    "account_ids": [demo_account_id],
+                    "message": f"Доступен счет: {demo_account_id}. Используйте get_account_info или get_portfolio для подробностей."
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "FINAM_DEMO_ACCOUNT_ID не установлен в переменных окружения."
+                }
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Ошибка при получении счетов: {e!s}"
+                "message": f"Ошибка при получении списка счетов: {e!s}"
             }
 
     async def get_account_info(self, account_id: str) -> dict[str, Any]:
@@ -118,7 +136,7 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            account_info = await self.client.accounts.get_account_info(account_id)
+            account_info = await self.client.account.get_account_info(account_id)
             return {
                 "status": "success",
                 "account_info": account_info,
@@ -136,18 +154,22 @@ class FinamAPIClientEnhanced:
         """
         Получить портфель по счету
         
+        Note: В finam-trade-api портфель является частью информации о счете.
+        Используем get_account_info который возвращает баланс, позиции и т.д.
+        
         Args:
             account_id: Идентификатор счета
             
         Returns:
-            Словарь с информацией о портфеле или ошибкой
+            Словарь с информацией о портфеле (балансе и позициях)
         """
         await self._ensure_initialized()
         try:
-            portfolio = await self.client.accounts.get_portfolio(account_id)
+            # Получаем полную информацию о счете (включает портфель)
+            account_info = await self.client.account.get_account_info(account_id)
             return {
                 "status": "success",
-                "portfolio": portfolio,
+                "portfolio": account_info,
                 "account_id": account_id,
                 "message": "Портфель получен успешно"
             }
@@ -162,47 +184,104 @@ class FinamAPIClientEnhanced:
         """
         Получить список заявок по счету
         
+        Note: Методы работы с ордерами (get_orders, place_order, cancel_order) 
+        не реализованы в текущей версии finam-trade-api и недоступны через REST API
+        для демо-счетов. Возвращаем пустой список.
+        
         Args:
             account_id: Идентификатор счета
             
         Returns:
-            Словарь со списком заявок или ошибкой
+            Словарь с пустым списком заявок и информационным сообщением
         """
         await self._ensure_initialized()
-        try:
-            orders = await self.client.orders.get_orders(account_id)
-            return {
-                "status": "success",
-                "orders": orders,
-                "account_id": account_id,
-                "message": f"Найдено заявок: {len(orders) if isinstance(orders, list) else 'неизвестно'}"
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "account_id": account_id,
-                "message": f"Ошибка при получении заявок: {e!s}"
-            }
+        
+        return {
+            "status": "success",
+            "orders": [],
+            "account_id": account_id,
+            "message": "Получение ордеров недоступно для демо-счетов. Для работы с ордерами используйте реальный счет и торговый терминал."
+        }
 
     async def get_instruments(self, query: str = "") -> dict[str, Any]:
         """
         Поиск инструментов
         
+        Note: В finam-trade-api нет метода для получения полного списка инструментов.
+        Возвращаем список популярных российских акций и информацию по запросу через get_asset.
+        
         Args:
-            query: Поисковый запрос (например, "SBER")
+            query: Поисковый запрос (тикер, например "SBER", "YNDX")
             
         Returns:
-            Словарь со списком найденных инструментов или ошибкой
+            Словарь со списком найденных инструментов
         """
         await self._ensure_initialized()
         try:
-            instruments = await self.client.instruments.get_instruments(query)
+            demo_account_id = os.getenv("FINAM_DEMO_ACCOUNT_ID", "")
+            
+            if not demo_account_id:
+                return {
+                    "status": "error",
+                    "query": query,
+                    "message": "FINAM_DEMO_ACCOUNT_ID не установлен. Требуется для получения информации об инструментах."
+                }
+            
+            # Список популярных тикеров (можно расширить)
+            popular_tickers = [
+                "SBER@MISX", "GAZP@MISX", "LKOH@MISX", "YNDX@MISX", 
+                "GMKN@MISX", "NVTK@MISX", "ROSN@MISX", "MGNT@MISX",
+                "TATN@MISX", "SNGS@MISX", "MTSS@MISX", "ALRS@MISX"
+            ]
+            
+            instruments = []
+            
+            # Если указан запрос, фильтруем тикеры или пробуем найти конкретный инструмент
+            if query:
+                query_upper = query.upper()
+                
+                # Проверяем, если это полный тикер формата SYMBOL@EXCHANGE
+                if "@" in query_upper:
+                    try:
+                        asset = await self.client.assets.get_asset(query_upper, demo_account_id)
+                        instruments.append(asset.model_dump())
+                    except:
+                        pass
+                else:
+                    # Добавляем @MISX и пробуем
+                    try:
+                        full_ticker = f"{query_upper}@MISX"
+                        asset = await self.client.assets.get_asset(full_ticker, demo_account_id)
+                        instruments.append(asset.model_dump())
+                    except:
+                        pass
+                
+                # Фильтруем популярные тикеры по запросу
+                for ticker in popular_tickers:
+                    if query_upper in ticker:
+                        try:
+                            asset = await self.client.assets.get_asset(ticker, demo_account_id)
+                            asset_dict = asset.model_dump()
+                            if asset_dict not in instruments:  # Избегаем дубликатов
+                                instruments.append(asset_dict)
+                        except:
+                            continue
+            else:
+                # Без запроса возвращаем популярные инструменты
+                for ticker in popular_tickers[:10]:  # Ограничим 10 для производительности
+                    try:
+                        asset = await self.client.assets.get_asset(ticker, demo_account_id)
+                        instruments.append(asset.model_dump())
+                    except:
+                        continue
+            
             return {
                 "status": "success",
                 "instruments": instruments,
                 "query": query,
-                "message": f"Найдено инструментов: {len(instruments) if isinstance(instruments, list) else 'неизвестно'}"
+                "message": f"Найдено инструментов: {len(instruments)}. Используйте формат TICKER@MISX для точного поиска."
             }
+            
         except Exception as e:
             return {
                 "status": "error",
@@ -281,24 +360,67 @@ class FinamAPIClientEnhanced:
 
         Args:
             symbol: Тикер инструмента
-            timeframe: Таймфрейм (D, H, M)
-            start: Начальная дата (ISO формат)
-            end: Конечная дата (ISO формат)
+            timeframe: Таймфрейм (D, H, M, 1H, 5M и т.д.)
+            start: Начальная дата в ISO формате (например, "2024-01-01T00:00:00Z")
+            end: Конечная дата в ISO формате (например, "2024-01-31T23:59:59Z")
 
         Returns:
             Словарь со свечами или ошибкой
         """
         await self._ensure_initialized()
         try:
-            candles = await self.client.instruments.get_bars(
-                symbol, timeframe, start, end
+            # Конвертируем строковый timeframe в enum TimeFrame
+            timeframe_map = {
+                "D": TimeFrame.TIME_FRAME_D,
+                "H": TimeFrame.TIME_FRAME_H1,
+                "1H": TimeFrame.TIME_FRAME_H1,
+                "2H": TimeFrame.TIME_FRAME_H2,
+                "4H": TimeFrame.TIME_FRAME_H4,
+                "8H": TimeFrame.TIME_FRAME_H8,
+                "M": TimeFrame.TIME_FRAME_M1,
+                "1M": TimeFrame.TIME_FRAME_M1,
+                "5M": TimeFrame.TIME_FRAME_M5,
+                "15M": TimeFrame.TIME_FRAME_M15,
+                "30M": TimeFrame.TIME_FRAME_M30,
+                "W": TimeFrame.TIME_FRAME_W,
+                "MN": TimeFrame.TIME_FRAME_MN,
+            }
+            
+            tf_enum = timeframe_map.get(timeframe.upper(), TimeFrame.TIME_FRAME_D)
+            
+            # Устанавливаем даты по умолчанию если не указаны
+            if not end:
+                end = datetime.utcnow().isoformat() + "Z"
+            if not start:
+                # По умолчанию - последние 30 дней
+                start = (datetime.utcnow() - timedelta(days=30)).isoformat() + "Z"
+            
+            # Создаем объект запроса
+            bars_request = BarsRequest(
+                symbol=symbol,
+                timeframe=tf_enum,
+                start_time=start,
+                end_time=end
             )
+            
+            # Получаем свечи
+            response = await self.client.instruments.get_bars(bars_request)
+            
+            # Обрабатываем ответ
+            if hasattr(response, 'model_dump'):
+                result_data = response.model_dump()
+            else:
+                result_data = response
+            
+            # Извлекаем список свечей (ключ называется 'bars', а не 'candles')
+            bars_list = result_data.get('bars', []) if isinstance(result_data, dict) else []
+            
             return {
                 "status": "success",
-                "candles": candles,
+                "candles": bars_list,
                 "symbol": symbol,
                 "timeframe": timeframe,
-                "message": f"Получено свечей: {len(candles) if isinstance(candles, list) else 'неизвестно'}"
+                "message": f"Получено свечей: {len(bars_list)}"
             }
         except Exception as e:
             return {
@@ -309,34 +431,14 @@ class FinamAPIClientEnhanced:
 
     async def get_assets(self) -> dict[str, Any]:
         """
-        Получить список всех доступных активов/инструментов
-
+        Получить список доступных активов/инструментов
+        
+        Note: Метод client.assets.get_assets() не реализован в текущей версии библиотеки.
+        Используем get_instruments() как альтернативу.
+        
         Returns:
-            Словарь со списком активов или ошибкой
+            Словарь со списком активов
         """
-        await self._ensure_initialized()
-        try:
-            assets_payload = await self.client.assets.get_assets()
-            assets_payload = (
-                assets_payload.model_dump()
-                if hasattr(assets_payload, "model_dump")
-                else assets_payload
-            )
-
-            assets_list = (
-                assets_payload.get("assets", [])
-                if isinstance(assets_payload, dict)
-                else assets_payload
-            )
-
-            return {
-                "status": "success",
-                "assets": assets_list,
-                "message": f"Найдено активов: {len(assets_list) if isinstance(assets_list, list) else 'неизвестно'}"
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Ошибка при получении списка активов: {e!s}"
-            }
+        # Просто вызываем get_instruments без фильтра
+        return await self.get_instruments("")
 
