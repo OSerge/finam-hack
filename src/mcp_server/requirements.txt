@@ -1,0 +1,5 @@
+# Основные зависимости для MCP сервера
+fastmcp==2.12.4
+finam-trade-api==4.1.0
+httpx==0.28.1
+python-dotenv==1.1.1

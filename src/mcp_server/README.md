@@ -9,7 +9,7 @@ MCP-сервер для работы с Finam TradeAPI через HTTP тран�
 poetry run mcp-server
 
 # Или напрямую
-poetry run python -m src.app.mcp_server.server
+poetry run python -m src.mcp_server.server
 ```
 
 ## 🔧 Настройка в Cursor IDE
@@ -32,22 +32,25 @@ poetry run python -m src.app.mcp_server.server
 
 ## 🛠️ Доступные инструменты
 
-- `check_finam_api` - проверка доступности API
-- `get_jwt_token_details` - детали JWT токена
-- `refresh_jwt_token` - обновление JWT токена
-- `get_finam_accounts` - список счетов
-- `get_finam_portfolio` - портфель
-- `get_finam_quotes` - котировки
-- `search_finam_instruments` - поиск инструментов
-- `get_finam_orderbook` - стакан заявок
-- `get_finam_candles` - исторические свечи
-- `get_finam_orders` - список заявок
+**Все инструменты поддерживают нативный async/await!**
+
+- `check_finam_api` - проверка доступности API (async)
+- `get_jwt_token_details` - детали JWT токена (async)
+- `refresh_jwt_token` - обновление JWT токена (async)
+- `get_finam_accounts` - список счетов (async)
+- `get_finam_portfolio` - портфель (async)
+- `get_finam_quotes` - котировки (async)
+- `search_finam_instruments` - поиск инструментов (async)
+- `get_finam_orderbook` - стакан заявок (async)
+- `get_finam_candles` - исторические свечи (async)
+- `get_finam_orders` - список заявок (async)
+- `get_finam_assets` - список всех активов (async)
 
 ## 🔐 Настройка токена
 
 Убедитесь, что в файле `.env` установлен:
 ```
-FINAM_TOKEN=your_secret_token_here
+FINAM_ACCESS_TOKEN=your_secret_token_here
 ```
 
 ## 📡 Доступ
@@ -55,7 +58,3 @@ FINAM_TOKEN=your_secret_token_here
 - **HTTP Endpoint**: `http://localhost:8765/mcp`
 - **Транспорт**: HTTP с Server-Sent Events
 - **Протокол**: MCP (Model Context Protocol)
-
-## 💡 Использование
-
-После настройки в Cursor используйте инструменты через MCP панель или запрашивайте у AI-ассистента выполнение операций с Finam API.
