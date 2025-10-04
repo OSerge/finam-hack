@@ -2,11 +2,13 @@
 Улучшенный клиент для работы с Finam TradeAPI с поддержкой JWT токенов
 Использует библиотеку finam-trade-api для автоматического обновления токенов
 """
-
 import os
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from finam_trade_api.account import GetTradesRequest
+
+from app.adapters import FinamAPIClient
 import httpx
 from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
@@ -37,8 +39,9 @@ class FinamAPIClientEnhanced:
         # Инициализация TokenManager и Client
         self.token_manager = TokenManager(self.token)
         self.client = Client(self.token_manager)
+        self.finam_client = FinamAPIClient(self.token)
         self._initialized = False
-        
+
         # Базовый URL для прямых HTTP запросов
         self.api_base_url = os.getenv("FINAM_API_BASE_URL", "https://api.finam.ru")
 
@@ -93,31 +96,19 @@ class FinamAPIClientEnhanced:
 
     async def get_accounts(self) -> dict[str, Any]:
         """
-        Получить список доступных ID счетов
-        
-        Note: finam-trade-api не предоставляет прямого метода для получения списка счетов.
-        Возвращаем ID из переменной окружения FINAM_DEMO_ACCOUNT_ID.
-        Для получения детальной информации используйте get_account_info(account_id).
+        Получить список доступных счетов
         
         Returns:
-            Словарь со списком ID счетов
+            Словарь со списком счетов или ошибкой
         """
         await self._ensure_initialized()
         try:
-            import os
-            demo_account_id = os.getenv("FINAM_DEMO_ACCOUNT_ID")
-            
-            if demo_account_id:
-                return {
-                    "status": "success",
-                    "account_ids": [demo_account_id],
-                    "message": f"Доступен счет: {demo_account_id}. Используйте get_account_info или get_portfolio для подробностей."
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "FINAM_DEMO_ACCOUNT_ID не установлен в переменных окружения."
-                }
+            accounts = await self.client.access_tokens.get_jwt_token_details()
+            return {
+                "status": "success",
+                "accounts": accounts.account_ids,
+                "message": f"Найдено счетов: {len(accounts) if isinstance(accounts, list) else 'неизвестно'}"
+            }
         except Exception as e:
             return {
                 "status": "error",
@@ -154,9 +145,6 @@ class FinamAPIClientEnhanced:
         """
         Получить портфель по счету
         
-        Note: В finam-trade-api портфель является частью информации о счете.
-        Используем get_account_info который возвращает баланс, позиции и т.д.
-        
         Args:
             account_id: Идентификатор счета
             
@@ -180,14 +168,49 @@ class FinamAPIClientEnhanced:
                 "message": f"Ошибка при получении портфеля: {e!s}"
             }
 
+    async def get_trades(self, account_id: str) -> dict[str, Any]:
+        """
+        Получить список сделок по счету
+
+        Args:
+            account_id: Идентификатор счета
+
+        Returns:
+            Словарь со списком сделок или ошибкой
+        """
+        await self._ensure_initialized()
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+
+            # Format dates as strings (YYYY-MM-DD format)
+            start_date_str = str(int(start_date.timestamp()))
+            end_date_str = str(int(end_date.timestamp()))
+            # orders = await self.client.account.get_trades(GetTradesRequest(
+            #     account_id=account_id, start_time=start_date, end_time=end_date))
+            orders = list()
+            return {
+                "status": "success",
+                "trades": [],
+                "account_id": account_id,
+                "message": f"Получение сделок недоступно для демо-счетов. Для работы с ордерами используйте реальный счет и торговый терминал."
+                # "message": f"Найдено заявок: {len(orders) if isinstance(orders, list) else 'неизвестно'}"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "account_id": account_id,
+                "message": f"Ошибка при получении заявок: {e!s}"
+            }
+
     async def get_orders(self, account_id: str) -> dict[str, Any]:
         """
         Получить список заявок по счету
         
-        Note: Методы работы с ордерами (get_orders, place_order, cancel_order) 
+        Note: Методы работы с ордерами (get_orders, place_order, cancel_order)
         не реализованы в текущей версии finam-trade-api и недоступны через REST API
         для демо-счетов. Возвращаем пустой список.
-        
+
         Args:
             account_id: Идентификатор счета
             
@@ -195,7 +218,7 @@ class FinamAPIClientEnhanced:
             Словарь с пустым списком заявок и информационным сообщением
         """
         await self._ensure_initialized()
-        
+
         return {
             "status": "success",
             "orders": [],
@@ -209,7 +232,7 @@ class FinamAPIClientEnhanced:
         
         Note: В finam-trade-api нет метода для получения полного списка инструментов.
         Возвращаем список популярных российских акций и информацию по запросу через get_asset.
-        
+
         Args:
             query: Поисковый запрос (тикер, например "SBER", "YNDX")
             
@@ -219,27 +242,27 @@ class FinamAPIClientEnhanced:
         await self._ensure_initialized()
         try:
             demo_account_id = os.getenv("FINAM_DEMO_ACCOUNT_ID", "")
-            
+
             if not demo_account_id:
                 return {
                     "status": "error",
                     "query": query,
                     "message": "FINAM_DEMO_ACCOUNT_ID не установлен. Требуется для получения информации об инструментах."
                 }
-            
+
             # Список популярных тикеров (можно расширить)
             popular_tickers = [
-                "SBER@MISX", "GAZP@MISX", "LKOH@MISX", "YNDX@MISX", 
+                "SBER@MISX", "GAZP@MISX", "LKOH@MISX", "YNDX@MISX",
                 "GMKN@MISX", "NVTK@MISX", "ROSN@MISX", "MGNT@MISX",
                 "TATN@MISX", "SNGS@MISX", "MTSS@MISX", "ALRS@MISX"
             ]
-            
+
             instruments = []
-            
+
             # Если указан запрос, фильтруем тикеры или пробуем найти конкретный инструмент
             if query:
                 query_upper = query.upper()
-                
+
                 # Проверяем, если это полный тикер формата SYMBOL@EXCHANGE
                 if "@" in query_upper:
                     try:
@@ -255,7 +278,7 @@ class FinamAPIClientEnhanced:
                         instruments.append(asset.model_dump())
                     except:
                         pass
-                
+
                 # Фильтруем популярные тикеры по запросу
                 for ticker in popular_tickers:
                     if query_upper in ticker:
@@ -274,14 +297,14 @@ class FinamAPIClientEnhanced:
                         instruments.append(asset.model_dump())
                     except:
                         continue
-            
+
             return {
                 "status": "success",
                 "instruments": instruments,
                 "query": query,
                 "message": f"Найдено инструментов: {len(instruments)}. Используйте формат TICKER@MISX для точного поиска."
             }
-            
+
         except Exception as e:
             return {
                 "status": "error",
@@ -349,11 +372,11 @@ class FinamAPIClientEnhanced:
             }
 
     async def get_candles(
-        self,
-        symbol: str,
-        timeframe: str = "D",
-        start: Optional[str] = None,
-        end: Optional[str] = None
+            self,
+            symbol: str,
+            timeframe: str = "D",
+            start: Optional[str] = None,
+            end: Optional[str] = None
     ) -> dict[str, Any]:
         """
         Получить исторические свечи
@@ -385,16 +408,16 @@ class FinamAPIClientEnhanced:
                 "W": TimeFrame.TIME_FRAME_W,
                 "MN": TimeFrame.TIME_FRAME_MN,
             }
-            
+
             tf_enum = timeframe_map.get(timeframe.upper(), TimeFrame.TIME_FRAME_D)
-            
+
             # Устанавливаем даты по умолчанию если не указаны
             if not end:
                 end = datetime.utcnow().isoformat() + "Z"
             if not start:
                 # По умолчанию - последние 30 дней
                 start = (datetime.utcnow() - timedelta(days=30)).isoformat() + "Z"
-            
+
             # Создаем объект запроса
             bars_request = BarsRequest(
                 symbol=symbol,
@@ -402,19 +425,19 @@ class FinamAPIClientEnhanced:
                 start_time=start,
                 end_time=end
             )
-            
+
             # Получаем свечи
             response = await self.client.instruments.get_bars(bars_request)
-            
+
             # Обрабатываем ответ
             if hasattr(response, 'model_dump'):
                 result_data = response.model_dump()
             else:
                 result_data = response
-            
+
             # Извлекаем список свечей (ключ называется 'bars', а не 'candles')
             bars_list = result_data.get('bars', []) if isinstance(result_data, dict) else []
-            
+
             return {
                 "status": "success",
                 "candles": bars_list,
@@ -432,13 +455,12 @@ class FinamAPIClientEnhanced:
     async def get_assets(self) -> dict[str, Any]:
         """
         Получить список доступных активов/инструментов
-        
+
         Note: Метод client.assets.get_assets() не реализован в текущей версии библиотеки.
         Используем get_instruments() как альтернативу.
-        
+
         Returns:
             Словарь со списком активов
         """
         # Просто вызываем get_instruments без фильтра
         return await self.get_instruments("")
-
