@@ -2,9 +2,10 @@
 Расширенный MCP-сервер с поддержкой JWT токенов для работы с Finam TradeAPI
 """
 
+import asyncio
 from typing import Optional
 
-import requests
+import httpx
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -22,26 +23,30 @@ class State:
     def __init__(self):
         self.finam_client: Optional[FinamAPIClientEnhanced] = None
         self.jwt_token: Optional[str] = None
+        self._client_lock: asyncio.Lock = asyncio.Lock()
 
 
 # Инициализируем состояние сервера
 mcp.state = State()
 
 
-def get_client() -> FinamAPIClientEnhanced:
+async def get_client() -> FinamAPIClientEnhanced:
     """
-    Получить или создать клиент Finam API
+    Получить или создать клиент Finam API (thread-safe)
 
     Returns:
         Экземпляр FinamAPIClientEnhanced
     """
-    if mcp.state.finam_client is None:
-        mcp.state.finam_client = FinamAPIClientEnhanced()
-    return mcp.state.finam_client
+    async with mcp.state._client_lock:
+        if mcp.state.finam_client is None:
+            mcp.state.finam_client = FinamAPIClientEnhanced()
+            # Предварительная инициализация JWT токена
+            await mcp.state.finam_client._ensure_initialized()
+        return mcp.state.finam_client
 
 
 @mcp.tool()
-def check_finam_api() -> dict[str, str | int]:
+async def check_finam_api() -> dict[str, str | int]:
     """
     Проверяет доступность Finam API (https://api.finam.ru/v1)
 
@@ -51,42 +56,43 @@ def check_finam_api() -> dict[str, str | int]:
         - code: HTTP статус код (если доступен)
         - message: Сообщение об ошибке (если есть)
     """
-    try:
-        response = requests.get("https://api.finam.ru/v1", timeout=10)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get("https://api.finam.ru/v1")
 
-        if response.status_code == 200:
+            if response.status_code == 200:
+                return {
+                    "status": "available",
+                    "code": response.status_code,
+                    "message": "API доступен",
+                }
             return {
-                "status": "available",
+                "status": "unavailable",
                 "code": response.status_code,
-                "message": "API доступен",
+                "message": f"API вернул статус код {response.status_code}",
             }
-        return {
-            "status": "unavailable",
-            "code": response.status_code,
-            "message": f"API вернул статус код {response.status_code}",
-        }
 
-    except requests.exceptions.Timeout:
-        return {
-            "status": "error",
-            "message": "Превышено время ожидания ответа от API",
-        }
+        except httpx.TimeoutException:
+            return {
+                "status": "error",
+                "message": "Превышено время ожидания ответа от API",
+            }
 
-    except requests.exceptions.ConnectionError:
-        return {
-            "status": "error",
-            "message": "Не удалось установить соединение с API",
-        }
+        except httpx.ConnectError:
+            return {
+                "status": "error",
+                "message": "Не удалось установить соединение с API",
+            }
 
-    except requests.exceptions.RequestException as e:
-        return {
-            "status": "error",
-            "message": f"Ошибка при проверке доступности API: {e!s}",
-        }
+        except httpx.HTTPError as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке доступности API: {e!s}",
+            }
 
 
 @mcp.tool()
-def get_jwt_token_details() -> dict[str, str | dict]:
+async def get_jwt_token_details() -> dict[str, str | dict]:
     """
     Получить детали текущего JWT токена Finam API
 
@@ -97,8 +103,8 @@ def get_jwt_token_details() -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_jwt_token_details_sync()
+        client = await get_client()
+        result = await client.get_jwt_token_details()
 
         # Сохраняем JWT токен в состоянии если успешно
         if result.get("status") == "success" and "token_details" in result:
@@ -110,12 +116,12 @@ def get_jwt_token_details() -> dict[str, str | dict]:
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении JWT токена: {e!s}"
         }
 
 
 @mcp.tool()
-def refresh_jwt_token() -> dict[str, str]:
+async def refresh_jwt_token() -> dict[str, str]:
     """
     Обновить JWT токен Finam API
 
@@ -125,8 +131,8 @@ def refresh_jwt_token() -> dict[str, str]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.refresh_jwt_token_sync()
+        client = await get_client()
+        result = await client.refresh_jwt_token()
 
         # Сохраняем обновленный JWT токен в состоянии если успешно
         if result.get("status") == "success":
@@ -137,12 +143,12 @@ def refresh_jwt_token() -> dict[str, str]:
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при обновлении JWT токена: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_accounts() -> dict[str, str | list | dict]:
+async def get_finam_accounts() -> dict[str, str | list | dict]:
     """
     Получить список доступных счетов Finam
 
@@ -153,18 +159,18 @@ def get_finam_accounts() -> dict[str, str | list | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_accounts_sync()
+        client = await get_client()
+        result = await client.get_accounts()
         return result
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении счетов: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_portfolio(account_id: str) -> dict[str, str | dict]:
+async def get_finam_portfolio(account_id: str) -> dict[str, str | dict]:
     """
     Получить портфель по счету Finam
 
@@ -179,19 +185,19 @@ def get_finam_portfolio(account_id: str) -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_portfolio_sync(account_id)
+        client = await get_client()
+        result = await client.get_portfolio(account_id)
         return result
     except Exception as e:
         return {
             "status": "error",
             "account_id": account_id,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении портфеля: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_quotes(symbol: str) -> dict[str, str | dict]:
+async def get_finam_quotes(symbol: str) -> dict[str, str | dict]:
     """
     Получить котировки инструмента через Finam API
 
@@ -206,19 +212,19 @@ def get_finam_quotes(symbol: str) -> dict[str, str | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_quotes_sync(symbol)
+        client = await get_client()
+        result = await client.get_quotes(symbol)
         return result
     except Exception as e:
         return {
             "status": "error",
             "symbol": symbol,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении котировок: {e!s}"
         }
 
 
 @mcp.tool()
-def search_finam_instruments(query: str = "") -> dict[str, str | list | dict]:
+async def search_finam_instruments(query: str = "") -> dict[str, str | list | dict]:
     """
     Поиск инструментов в Finam API
 
@@ -233,19 +239,19 @@ def search_finam_instruments(query: str = "") -> dict[str, str | list | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_instruments_sync(query)
+        client = await get_client()
+        result = await client.get_instruments(query)
         return result
     except Exception as e:
         return {
             "status": "error",
             "query": query,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при поиске инструментов: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | int]:
+async def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | int]:
     """
     Получить стакан заявок для инструмента
 
@@ -262,20 +268,20 @@ def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | 
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_orderbook_sync(symbol, depth)
+        client = await get_client()
+        result = await client.get_orderbook(symbol, depth)
         return result
     except Exception as e:
         return {
             "status": "error",
             "symbol": symbol,
             "depth": depth,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении стакана заявок: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_candles(
+async def get_finam_candles(
     symbol: str,
     timeframe: str = "D",
     start: str | None = None,
@@ -299,20 +305,20 @@ def get_finam_candles(
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_candles_sync(symbol, timeframe, start, end)
+        client = await get_client()
+        result = await client.get_candles(symbol, timeframe, start, end)
         return result
     except Exception as e:
         return {
             "status": "error",
             "symbol": symbol,
             "timeframe": timeframe,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении свечей: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
+async def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
     """
     Получить список заявок по счету
 
@@ -327,19 +333,19 @@ def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_orders_sync(account_id)
+        client = await get_client()
+        result = await client.get_orders(account_id)
         return result
     except Exception as e:
         return {
             "status": "error",
             "account_id": account_id,
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении заявок: {e!s}"
         }
 
 
 @mcp.tool()
-def get_finam_assets() -> dict[str, str | list | dict]:
+async def get_finam_assets() -> dict[str, str | list | dict]:
     """
     Получить список всех доступных активов/инструментов через Finam API
 
@@ -350,13 +356,13 @@ def get_finam_assets() -> dict[str, str | list | dict]:
         - message: Сообщение о результате
     """
     try:
-        client = get_client()
-        result = client.get_assets_sync()
+        client = await get_client()
+        result = await client.get_assets()
         return result
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {e!s}"
+            "message": f"Ошибка при получении активов: {e!s}"
         }
 
 

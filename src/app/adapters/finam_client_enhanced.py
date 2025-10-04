@@ -3,20 +3,15 @@
 Использует библиотеку finam-trade-api для автоматического обновления токенов
 """
 
-import asyncio
 import os
 from typing import Any, Optional
 
 import httpx
-import nest_asyncio
 from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
-
-# Применяем nest_asyncio для поддержки вложенных event loops
-nest_asyncio.apply()
 
 
 class FinamAPIClientEnhanced:
@@ -342,65 +337,3 @@ class FinamAPIClientEnhanced:
                 "message": f"Ошибка при получении списка активов: {e!s}"
             }
 
-    # Синхронные обертки для совместимости с существующим кодом
-    def _run_async(self, coro) -> Any:
-        """
-        Запускает асинхронную функцию в синхронном контексте
-        """
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        return loop.run_until_complete(coro)
-
-    def get_jwt_token_details_sync(self) -> dict[str, Any]:
-        """Синхронная версия получения JWT токена"""
-        return self._run_async(self.get_jwt_token_details())
-
-    def refresh_jwt_token_sync(self) -> dict[str, Any]:
-        """Синхронная версия обновления JWT токена"""
-        return self._run_async(self.refresh_jwt_token())
-
-    def get_accounts_sync(self) -> dict[str, Any]:
-        """Синхронная версия получения счетов"""
-        return self._run_async(self.get_accounts())
-
-    def get_account_info_sync(self, account_id: str) -> dict[str, Any]:
-        """Синхронная версия получения информации о счете"""
-        return self._run_async(self.get_account_info(account_id))
-
-    def get_portfolio_sync(self, account_id: str) -> dict[str, Any]:
-        """Синхронная версия получения портфеля"""
-        return self._run_async(self.get_portfolio(account_id))
-
-    def get_orders_sync(self, account_id: str) -> dict[str, Any]:
-        """Синхронная версия получения заявок"""
-        return self._run_async(self.get_orders(account_id))
-
-    def get_instruments_sync(self, query: str = "") -> dict[str, Any]:
-        """Синхронная версия поиска инструментов"""
-        return self._run_async(self.get_instruments(query))
-
-    def get_quotes_sync(self, symbol: str) -> dict[str, Any]:
-        """Синхронная версия получения котировок"""
-        return self._run_async(self.get_quotes(symbol))
-
-    def get_orderbook_sync(self, symbol: str, depth: int = 10) -> dict[str, Any]:
-        """Синхронная версия получения стакана заявок"""
-        return self._run_async(self.get_orderbook(symbol, depth))
-
-    def get_candles_sync(
-        self,
-        symbol: str,
-        timeframe: str = "D",
-        start: Optional[str] = None,
-        end: Optional[str] = None
-    ) -> dict[str, Any]:
-        """Синхронная версия получения свечей"""
-        return self._run_async(self.get_candles(symbol, timeframe, start, end))
-
-    def get_assets_sync(self) -> dict[str, Any]:
-        """Синхронная версия получения списка активов"""
-        return self._run_async(self.get_assets())
