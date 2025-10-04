@@ -159,7 +159,7 @@ def generate_api_call(question: str, examples: list[dict[str, str]], model: str)
     messages = [{"role": "user", "content": prompt}]
 
     try:
-        response = call_llm(messages, temperature=0.0, max_tokens=200)
+        response = call_llm(messages, temperature=0.0, max_tokens=200)  # Uses OPENROUTER_INCLUDE_REASONING from .env
         llm_answer = response["choices"][0]["message"]["content"].strip()
 
         method, request = parse_llm_response(llm_answer)
