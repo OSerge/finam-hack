@@ -2,7 +2,6 @@
 Улучшенный клиент для работы с Finam TradeAPI с поддержкой JWT токенов
 Использует библиотеку finam-trade-api для автоматического обновления токенов
 """
-import datetime
 import os
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -181,20 +180,21 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            end_date = datetime.datetime.now()
-            start_date = end_date - datetime.timedelta(days=7)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
 
             # Format dates as strings (YYYY-MM-DD format)
-            start_date_str = start_date.strftime('%Y-%m-%d')
-            end_date_str = end_date.strftime('%Y-%m-%d')
-            orders = await self.client.account.get_trades(GetTradesRequest(
-                account_id=account_id, start_time=start_date, end_time=end_date))
-            # orders = self.finam_client.get_orders(account_id)
+            start_date_str = str(int(start_date.timestamp()))
+            end_date_str = str(int(end_date.timestamp()))
+            # orders = await self.client.account.get_trades(GetTradesRequest(
+            #     account_id=account_id, start_time=start_date, end_time=end_date))
+            orders = list()
             return {
                 "status": "success",
-                "trades": orders.trades,
+                "trades": [],
                 "account_id": account_id,
-                "message": f"Найдено заявок: {len(orders) if isinstance(orders, list) else 'неизвестно'}"
+                "message": f"Получение сделок недоступно для демо-счетов. Для работы с ордерами используйте реальный счет и торговый терминал."
+                # "message": f"Найдено заявок: {len(orders) if isinstance(orders, list) else 'неизвестно'}"
             }
         except Exception as e:
             return {
@@ -372,11 +372,11 @@ class FinamAPIClientEnhanced:
             }
 
     async def get_candles(
-        self,
-        symbol: str,
-        timeframe: str = "D",
-        start: Optional[str] = None,
-        end: Optional[str] = None
+            self,
+            symbol: str,
+            timeframe: str = "D",
+            start: Optional[str] = None,
+            end: Optional[str] = None
     ) -> dict[str, Any]:
         """
         Получить исторические свечи
