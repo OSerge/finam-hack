@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
 """
-Скрипт для генерации submission.csv на основе test.csv
+Скрипт для генерации submission.csv на основе test.csv с использованием MCP tools
 
-Использует LLM для преобразования вопросов на естественном языке
-в HTTP запросы к Finam TradeAPI.
+Использует LLM + MCP tools для преобразования вопросов на естественном языке
+в HTTP запросы к Finam TradeAPI с возможностью вызова инструментов для
+получения контекста (поиск инструментов, проверка символов и т.д.)
 
 Использование:
-    python scripts/generate_submission.py [OPTIONS]
+    python scripts/generate_submission_adv.py [OPTIONS]
 
 Опции:
     --test-file PATH      Путь к test.csv (по умолчанию: data/processed/test.csv)
     --train-file PATH     Путь к train.csv (по умолчанию: data/processed/train.csv)
     --output-file PATH    Путь к submission.csv (по умолчанию: data/processed/submission.csv)
     --num-examples INT    Количество примеров для few-shot (по умолчанию: 10)
-    --batch-size INT      Размер батча для обработки (по умолчанию: 5)
+    --mcp-url URL         URL MCP сервера (по умолчанию: http://localhost:8765)
+    --use-mcp/--no-mcp    Использовать MCP tools (по умолчанию: True)
+    --max-iterations INT  Максимальное количество итераций tool calling (по умолчанию: 3)
 """
 
+import asyncio
 import csv
+import json
 import random
 from pathlib import Path
+from typing import Any
 
 import click
 from tqdm import tqdm  # type: ignore[import-untyped]
 
-from src.app.core.llm import call_llm
+from src.app.core.llm import call_llm, call_llm_with_tools
+from src.app.core.mcp_client import MCPClient
 
 
 def calculate_cost(usage: dict, model: str) -> float:
@@ -116,6 +123,45 @@ TIME_FRAME_H1, TIME_FRAME_H4, TIME_FRAME_D, TIME_FRAME_W, TIME_FRAME_MN
     return prompt
 
 
+def create_system_prompt_with_tools() -> str:
+    """Системный промпт для работы с MCP tools"""
+    return """Ты - эксперт по Finam TradeAPI. Твоя задача - преобразовать вопрос на русском языке в HTTP запрос к API.
+
+У тебя есть доступ к инструментам для:
+- Поиска торговых инструментов (search_finam_instruments)
+- Получения списка всех инструментов (get_finam_assets)
+- Получения котировок (get_finam_quotes)
+- Получения стакана заявок (get_finam_orderbook)
+
+ВАЖНО: Используй инструменты ТОЛЬКО если:
+1. Нужно найти точный символ инструмента (например, "Сбербанк" -> "SBER@MISX")
+2. Нужно проверить существование инструмента
+3. Вопрос неоднозначный и требует дополнительного контекста
+
+После получения контекста, сформируй ФИНАЛЬНЫЙ ОТВЕТ в формате:
+HTTP_METHOD /path
+
+Например:
+GET /v1/instruments/SBER@MISX/quotes/latest
+POST /v1/accounts/{account_id}/orders
+DELETE /v1/accounts/{account_id}/orders/ORD123
+
+API Documentation:
+- GET /v1/exchanges - список бирж
+- GET /v1/assets - поиск инструментов
+- GET /v1/assets/{symbol} - информация об инструменте
+- GET /v1/instruments/{symbol}/quotes/latest - последняя котировка
+- GET /v1/instruments/{symbol}/orderbook - биржевой стакан
+- GET /v1/instruments/{symbol}/trades/latest - лента сделок
+- GET /v1/instruments/{symbol}/bars - исторические свечи
+- GET /v1/accounts/{account_id} - информация о счете
+- GET /v1/accounts/{account_id}/orders - список ордеров
+- GET /v1/accounts/{account_id}/orders/{order_id} - информация об ордере
+- POST /v1/sessions - создание новой сессии
+- POST /v1/accounts/{account_id}/orders - создание ордера
+- DELETE /v1/accounts/{account_id}/orders/{order_id} - отмена ордера"""
+
+
 def parse_llm_response(response: str) -> tuple[str, str]:
     """Парсинг ответа LLM в (type, request)"""
     response = response.strip()
@@ -148,8 +194,129 @@ def parse_llm_response(response: str) -> tuple[str, str]:
     return method, request
 
 
+async def execute_tool_calls(
+    mcp_url: str,
+    tool_calls: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Выполнить tool calls через MCP client"""
+    results = []
+
+    async with MCPClient(base_url=mcp_url) as client:
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+
+            try:
+                if isinstance(tool_call["function"]["arguments"], str):
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                else:
+                    arguments = tool_call["function"]["arguments"]
+            except json.JSONDecodeError:
+                arguments = {}
+
+            try:
+                result = await client.call_tool(tool_name, arguments)
+                results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps(result, ensure_ascii=False)
+                })
+            except Exception as e:
+                results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps({"error": str(e)}, ensure_ascii=False)
+                })
+
+    return results
+
+
+async def generate_api_call_with_mcp(
+    question: str,
+    examples: list[dict[str, str]],
+    tools: list[dict[str, Any]],
+    mcp_url: str,
+    model: str,
+    max_iterations: int = 3
+) -> tuple[dict[str, str], float]:
+    """
+    Сгенерировать API запрос с использованием MCP tools
+
+    Returns:
+        tuple: (result_dict, cost_in_dollars)
+    """
+    # Создаем промпт с few-shot примерами
+    few_shot_examples = "\n\nПримеры:\n\n"
+    for ex in examples:
+        few_shot_examples += f'Вопрос: "{ex["question"]}"\n'
+        few_shot_examples += f"Ответ: {ex['type']} {ex['request']}\n\n"
+
+    user_prompt = f"""{few_shot_examples}
+
+Вопрос: "{question}"
+
+Проанализируй вопрос и сформируй HTTP запрос к Finam API.
+Используй инструменты для поиска, если нужно уточнить символ инструмента.
+После сбора контекста дай ФИНАЛЬНЫЙ ОТВЕТ в формате: HTTP_METHOD /path"""
+
+    conversation_history = [
+        {"role": "system", "content": create_system_prompt_with_tools()},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    total_cost = 0.0
+
+    try:
+        for iteration in range(max_iterations):
+            response = call_llm_with_tools(
+                conversation_history,
+                tools,
+                temperature=0.0,
+                max_tokens=500
+                # include_reasoning uses OPENROUTER_INCLUDE_REASONING from .env
+            )
+
+            # Считаем стоимость
+            usage = response.get("usage", {})
+            total_cost += calculate_cost(usage, model)
+
+            assistant_message = response["choices"][0]["message"]
+
+            # Проверяем наличие tool_calls
+            if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
+                # Выполняем tool calls
+                tool_results = await execute_tool_calls(mcp_url, assistant_message["tool_calls"])
+
+                # Добавляем в историю
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": assistant_message.get("content") or "",
+                    "tool_calls": assistant_message["tool_calls"]
+                })
+
+                for result in tool_results:
+                    conversation_history.append(result)
+
+                # Продолжаем цикл для получения финального ответа
+                continue
+
+            # Получили финальный ответ
+            final_content = assistant_message.get("content", "").strip()
+            method, request = parse_llm_response(final_content)
+
+            return {"type": method, "request": request}, total_cost
+
+        # Если достигли максимального количества итераций
+        return {"type": "GET", "request": "/v1/assets"}, total_cost
+
+    except Exception as e:
+        click.echo(f"⚠️  Ошибка при генерации для вопроса '{question[:50]}...': {e}", err=True)
+        return {"type": "GET", "request": "/v1/assets"}, total_cost
+
+
 def generate_api_call(question: str, examples: list[dict[str, str]], model: str) -> tuple[dict[str, str], float]:
-    """Сгенерировать API запрос для вопроса
+    """Сгенерировать API запрос для вопроса (базовый режим без MCP)
 
     Returns:
         tuple: (result_dict, cost_in_dollars)
@@ -159,7 +326,7 @@ def generate_api_call(question: str, examples: list[dict[str, str]], model: str)
     messages = [{"role": "user", "content": prompt}]
 
     try:
-        response = call_llm(messages, temperature=0.0, max_tokens=200)  # Uses OPENROUTER_INCLUDE_REASONING from .env
+        response = call_llm(messages, temperature=0.0, max_tokens=200)
         llm_answer = response["choices"][0]["message"]["content"].strip()
 
         method, request = parse_llm_response(llm_answer)
@@ -174,6 +341,12 @@ def generate_api_call(question: str, examples: list[dict[str, str]], model: str)
         click.echo(f"⚠️  Ошибка при генерации для вопроса '{question[:50]}...': {e}", err=True)
         # Возвращаем fallback
         return {"type": "GET", "request": "/v1/assets"}, 0.0
+
+
+async def load_mcp_tools(mcp_url: str) -> list[dict[str, Any]]:
+    """Загрузить tools от MCP сервера"""
+    async with MCPClient(base_url=mcp_url) as client:
+        return await client.get_openai_tools()
 
 
 @click.command()
@@ -196,8 +369,19 @@ def generate_api_call(question: str, examples: list[dict[str, str]], model: str)
     help="Путь к submission.csv",
 )
 @click.option("--num-examples", type=int, default=10, help="Количество примеров для few-shot")
-def main(test_file: Path, train_file: Path, output_file: Path, num_examples: int) -> None:
-    """Генерация submission.csv для хакатона"""
+@click.option("--mcp-url", type=str, default="http://localhost:8765", help="URL MCP сервера")
+@click.option("--use-mcp/--no-mcp", default=True, help="Использовать MCP tools")
+@click.option("--max-iterations", type=int, default=3, help="Максимальное количество итераций tool calling")
+def main(  # noqa: C901
+    test_file: Path,
+    train_file: Path,
+    output_file: Path,
+    num_examples: int,
+    mcp_url: str,
+    use_mcp: bool,
+    max_iterations: int
+) -> None:
+    """Генерация submission.csv для хакатона с использованием MCP tools"""
     from src.app.core.config import get_settings
 
     click.echo("🚀 Генерация submission файла...")
@@ -212,6 +396,19 @@ def main(test_file: Path, train_file: Path, output_file: Path, num_examples: int
     click.echo(f"✅ Загружено {len(examples)} примеров для few-shot learning")
     click.echo(f"🤖 Используется модель: {model}")
 
+    # Загружаем MCP tools если нужно
+    tools = []
+    if use_mcp:
+        click.echo(f"🔄 Загрузка MCP tools с {mcp_url}...")
+        try:
+            tools = asyncio.run(load_mcp_tools(mcp_url))
+            click.echo(f"✅ Загружено {len(tools)} MCP tools")
+            click.echo(f"🔧 Максимум итераций tool calling: {max_iterations}")
+        except Exception as e:
+            click.echo(f"⚠️  Не удалось загрузить MCP tools: {e}")
+            click.echo("   Переключаюсь на базовый режим без MCP")
+            use_mcp = False
+
     # Читаем тестовый набор
     click.echo(f"📖 Чтение {test_file}...")
     test_questions = []
@@ -223,14 +420,31 @@ def main(test_file: Path, train_file: Path, output_file: Path, num_examples: int
     click.echo(f"✅ Найдено {len(test_questions)} вопросов для обработки")
 
     # Генерируем ответы
-    click.echo("\n🤖 Генерация API запросов с помощью LLM...")
+    mode_str = "MCP tools" if use_mcp else "базовый режим"
+    click.echo(f"\n🤖 Генерация API запросов ({mode_str})...")
     results = []
     total_cost = 0.0
 
     # Используем tqdm с postfix для отображения стоимости
     progress_bar = tqdm(test_questions, desc="Обработка")
+
     for item in progress_bar:
-        api_call, cost = generate_api_call(item["question"], examples, model)
+        if use_mcp:
+            # Асинхронная генерация с MCP tools
+            api_call, cost = asyncio.run(
+                generate_api_call_with_mcp(
+                    item["question"],
+                    examples,
+                    tools,
+                    mcp_url,
+                    model,
+                    max_iterations
+                )
+            )
+        else:
+            # Базовая генерация без MCP
+            api_call, cost = generate_api_call(item["question"], examples, model)
+
         total_cost += cost
         results.append({"uid": item["uid"], "type": api_call["type"], "request": api_call["request"]})
 
