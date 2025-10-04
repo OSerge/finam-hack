@@ -2,9 +2,9 @@
 Расширенный MCP-сервер с поддержкой JWT токенов для работы с Finam TradeAPI
 """
 
-import os
-import requests
 from typing import Optional
+
+import requests
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -53,36 +53,35 @@ def check_finam_api() -> dict[str, str | int]:
     """
     try:
         response = requests.get("https://api.finam.ru/v1", timeout=10)
-        
+
         if response.status_code == 200:
             return {
                 "status": "available",
                 "code": response.status_code,
                 "message": "API доступен",
             }
-        else:
-            return {
-                "status": "unavailable",
-                "code": response.status_code,
-                "message": f"API вернул статус код {response.status_code}",
-            }
-    
+        return {
+            "status": "unavailable",
+            "code": response.status_code,
+            "message": f"API вернул статус код {response.status_code}",
+        }
+
     except requests.exceptions.Timeout:
         return {
             "status": "error",
             "message": "Превышено время ожидания ответа от API",
         }
-    
+
     except requests.exceptions.ConnectionError:
         return {
             "status": "error",
             "message": "Не удалось установить соединение с API",
         }
-    
+
     except requests.exceptions.RequestException as e:
         return {
             "status": "error",
-            "message": f"Ошибка при проверке доступности API: {str(e)}",
+            "message": f"Ошибка при проверке доступности API: {e!s}",
         }
 
 
@@ -104,14 +103,14 @@ def get_jwt_token_details() -> dict[str, str | dict]:
         # Сохраняем JWT токен в состоянии если успешно
         if result.get("status") == "success" and "token_details" in result:
             # Получаем JWT токен из клиента
-            if hasattr(client.client, 'access_tokens') and hasattr(client.client.access_tokens, 'jwt_token'):
+            if hasattr(client.client, "access_tokens") and hasattr(client.client.access_tokens, "jwt_token"):
                 mcp.state.jwt_token = client.client.access_tokens.jwt_token
 
         return result
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -131,14 +130,14 @@ def refresh_jwt_token() -> dict[str, str]:
 
         # Сохраняем обновленный JWT токен в состоянии если успешно
         if result.get("status") == "success":
-            if hasattr(client.client, 'access_tokens') and hasattr(client.client.access_tokens, 'jwt_token'):
+            if hasattr(client.client, "access_tokens") and hasattr(client.client.access_tokens, "jwt_token"):
                 mcp.state.jwt_token = client.client.access_tokens.jwt_token
 
         return result
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -160,7 +159,7 @@ def get_finam_accounts() -> dict[str, str | list | dict]:
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -187,7 +186,7 @@ def get_finam_portfolio(account_id: str) -> dict[str, str | dict]:
         return {
             "status": "error",
             "account_id": account_id,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -214,7 +213,7 @@ def get_finam_quotes(symbol: str) -> dict[str, str | dict]:
         return {
             "status": "error",
             "symbol": symbol,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -241,7 +240,7 @@ def search_finam_instruments(query: str = "") -> dict[str, str | list | dict]:
         return {
             "status": "error",
             "query": query,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -271,7 +270,7 @@ def get_finam_orderbook(symbol: str, depth: int = 10) -> dict[str, str | dict | 
             "status": "error",
             "symbol": symbol,
             "depth": depth,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -308,7 +307,7 @@ def get_finam_candles(
             "status": "error",
             "symbol": symbol,
             "timeframe": timeframe,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -335,7 +334,29 @@ def get_finam_orders(account_id: str) -> dict[str, str | dict | list]:
         return {
             "status": "error",
             "account_id": account_id,
-            "message": f"Ошибка при инициализации клиента: {str(e)}"
+            "message": f"Ошибка при инициализации клиента: {e!s}"
+        }
+
+
+@mcp.tool()
+def get_finam_assets() -> dict[str, str | list | dict]:
+    """
+    Получить список всех доступных активов/инструментов через Finam API
+
+    Returns:
+        Словарь со списком активов/инструментов:
+        - status: "success" | "error"
+        - assets: Список доступных активов/инструментов (если успешно)
+        - message: Сообщение о результате
+    """
+    try:
+        client = get_client()
+        result = client.get_assets_sync()
+        return result
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Ошибка при инициализации клиента: {e!s}"
         }
 
 
@@ -344,7 +365,7 @@ def main() -> None:
     Точка входа для запуска расширенного MCP-сервера в HTTP режиме
     """
     PORT = 8765
-    
+
     print("🚀 Запуск расширенного MCP-сервера в режиме HTTP...")
     print(f"📡 Сервер будет доступен по адресу: http://localhost:{PORT}")
     print(f"🔗 MCP endpoint: http://localhost:{PORT}/mcp")
@@ -360,8 +381,9 @@ def main() -> None:
     print("   - get_finam_orderbook: Получение стакана заявок")
     print("   - get_finam_candles: Получение исторических свечей")
     print("   - get_finam_orders: Получение списка заявок")
+    print("   - get_finam_assets: Получение всех доступных инструментов")
     print("=" * 60)
-    
+
     mcp.run(transport="http", host="0.0.0.0", port=PORT)
 
 

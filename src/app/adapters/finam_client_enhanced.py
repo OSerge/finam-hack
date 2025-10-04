@@ -6,9 +6,10 @@
 import asyncio
 import os
 from typing import Any, Optional
-from dotenv import load_dotenv
-import nest_asyncio
 
+import httpx
+import nest_asyncio
+from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
 
 # Загружаем переменные окружения из .env файла
@@ -36,7 +37,7 @@ class FinamAPIClientEnhanced:
         self.token = token or os.getenv("FINAM_TOKEN", "")
         if not self.token:
             raise ValueError("FINAM_TOKEN не установлен в переменных окружения")
-        
+
         # Инициализация TokenManager и Client
         self.token_manager = TokenManager(self.token)
         self.client = Client(self.token_manager)
@@ -68,7 +69,7 @@ class FinamAPIClientEnhanced:
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Ошибка при получении JWT токена: {str(e)}"
+                "message": f"Ошибка при получении JWT токена: {e!s}"
             }
 
     async def refresh_jwt_token(self) -> dict[str, Any]:
@@ -88,7 +89,7 @@ class FinamAPIClientEnhanced:
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Ошибка при обновлении JWT токена: {str(e)}"
+                "message": f"Ошибка при обновлении JWT токена: {e!s}"
             }
 
     async def get_accounts(self) -> dict[str, Any]:
@@ -109,7 +110,7 @@ class FinamAPIClientEnhanced:
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Ошибка при получении счетов: {str(e)}"
+                "message": f"Ошибка при получении счетов: {e!s}"
             }
 
     async def get_account_info(self, account_id: str) -> dict[str, Any]:
@@ -135,7 +136,7 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "account_id": account_id,
-                "message": f"Ошибка при получении информации о счете: {str(e)}"
+                "message": f"Ошибка при получении информации о счете: {e!s}"
             }
 
     async def get_portfolio(self, account_id: str) -> dict[str, Any]:
@@ -161,7 +162,7 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "account_id": account_id,
-                "message": f"Ошибка при получении портфеля: {str(e)}"
+                "message": f"Ошибка при получении портфеля: {e!s}"
             }
 
     async def get_orders(self, account_id: str) -> dict[str, Any]:
@@ -187,7 +188,7 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "account_id": account_id,
-                "message": f"Ошибка при получении заявок: {str(e)}"
+                "message": f"Ошибка при получении заявок: {e!s}"
             }
 
     async def get_instruments(self, query: str = "") -> dict[str, Any]:
@@ -213,7 +214,7 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "query": query,
-                "message": f"Ошибка при поиске инструментов: {str(e)}"
+                "message": f"Ошибка при поиске инструментов: {e!s}"
             }
 
     async def get_quotes(self, symbol: str) -> dict[str, Any]:
@@ -239,7 +240,7 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "symbol": symbol,
-                "message": f"Ошибка при получении котировок: {str(e)}"
+                "message": f"Ошибка при получении котировок: {e!s}"
             }
 
     async def get_orderbook(self, symbol: str, depth: int = 10) -> dict[str, Any]:
@@ -267,25 +268,25 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "symbol": symbol,
-                "message": f"Ошибка при получении стакана заявок: {str(e)}"
+                "message": f"Ошибка при получении стакана заявок: {e!s}"
             }
 
     async def get_candles(
-        self, 
-        symbol: str, 
-        timeframe: str = "D", 
-        start: Optional[str] = None, 
+        self,
+        symbol: str,
+        timeframe: str = "D",
+        start: Optional[str] = None,
         end: Optional[str] = None
     ) -> dict[str, Any]:
         """
         Получить исторические свечи
-        
+
         Args:
             symbol: Тикер инструмента
             timeframe: Таймфрейм (D, H, M)
             start: Начальная дата (ISO формат)
             end: Конечная дата (ISO формат)
-            
+
         Returns:
             Словарь со свечами или ошибкой
         """
@@ -305,7 +306,40 @@ class FinamAPIClientEnhanced:
             return {
                 "status": "error",
                 "symbol": symbol,
-                "message": f"Ошибка при получении свечей: {str(e)}"
+                "message": f"Ошибка при получении свечей: {e!s}"
+            }
+
+    async def get_assets(self) -> dict[str, Any]:
+        """
+        Получить список всех доступных активов/инструментов
+
+        Returns:
+            Словарь со списком активов или ошибкой
+        """
+        await self._ensure_initialized()
+        try:
+            # Используем _exec_request для автоматического управления JWT токеном
+            # _exec_request уже добавляет /v1 префикс и возвращает (data, success)
+            result = await self.client.assets._exec_request(
+                method=self.client.assets.RequestMethod.GET,
+                url="/assets"
+            )
+
+            # _exec_request возвращает кортеж (data, success)
+            assets_data = result[0] if isinstance(result, tuple) else result
+
+            # Извлекаем список активов из ответа
+            assets_list = assets_data.get("assets", []) if isinstance(assets_data, dict) else assets_data
+
+            return {
+                "status": "success",
+                "assets": assets_list,
+                "message": f"Найдено активов: {len(assets_list) if isinstance(assets_list, list) else 'неизвестно'}"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при получении списка активов: {e!s}"
             }
 
     # Синхронные обертки для совместимости с существующим кодом
@@ -318,7 +352,7 @@ class FinamAPIClientEnhanced:
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         return loop.run_until_complete(coro)
 
     def get_jwt_token_details_sync(self) -> dict[str, Any]:
@@ -358,11 +392,15 @@ class FinamAPIClientEnhanced:
         return self._run_async(self.get_orderbook(symbol, depth))
 
     def get_candles_sync(
-        self, 
-        symbol: str, 
-        timeframe: str = "D", 
-        start: Optional[str] = None, 
+        self,
+        symbol: str,
+        timeframe: str = "D",
+        start: Optional[str] = None,
         end: Optional[str] = None
     ) -> dict[str, Any]:
         """Синхронная версия получения свечей"""
         return self._run_async(self.get_candles(symbol, timeframe, start, end))
+
+    def get_assets_sync(self) -> dict[str, Any]:
+        """Синхронная версия получения списка активов"""
+        return self._run_async(self.get_assets())
