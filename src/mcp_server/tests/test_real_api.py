@@ -4,7 +4,7 @@
 ВАЖНО: 
 - Эти тесты отправляют РЕАЛЬНЫЕ запросы к Finam API!
 - Используют демо-аккаунт из FINAM_DEMO_ACCOUNT_ID в .env (безопасно!)
-- Требуют FINAM_TOKEN в .env файле
+- Требуют FINAM_ACCESS_TOKEN в .env файле
 """
 
 import pytest
@@ -127,6 +127,31 @@ class TestRealAPI:
         assert api_check.data["status"] in ["available", "unavailable", "error"]
         assert "status" in search.data
         assert "status" in quotes.data
+
+    async def test_get_orderbook_depth_limit(self, mcp_client, real_finam_token):
+        """Проверка, что глубина стакана ограничивается."""
+
+        depth = 3
+        result = await mcp_client.call_tool(
+            "get_finam_orderbook",
+            {"symbol": "SBER@MISX", "depth": depth},
+        )
+
+        print(f"\n✅ Depth-limited orderbook: {result.data}")
+        assert result.data["status"] == "success"
+        rows = result.data["orderbook"]["orderbook"].get("rows", [])
+        assert len(rows) <= depth
+
+    async def test_get_assets_payload(self, mcp_client, real_finam_token):
+        """Проверка, что получаем список активов."""
+
+        result = await mcp_client.call_tool("get_finam_assets", {})
+
+        print(f"\n✅ Assets payload: {result.data}")
+        assert result.data["status"] == "success"
+        assets = result.data.get("assets")
+        assert isinstance(assets, list)
+        assert assets
 
 
 class TestRealAPIWithAccounts:

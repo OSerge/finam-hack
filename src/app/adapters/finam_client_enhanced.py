@@ -6,11 +6,9 @@
 import os
 from typing import Any, Optional
 
-import httpx
 from dotenv import load_dotenv
 from finam_trade_api import Client, TokenManager
 
-# Загружаем переменные окружения из .env файла
 load_dotenv()
 
 
@@ -27,11 +25,11 @@ class FinamAPIClientEnhanced:
         Инициализация клиента с TokenManager
         
         Args:
-            token: Секретный токен для доступа к API (из переменной окружения FINAM_TOKEN)
+            token: Секретный токен для доступа к API (из переменной окружения FINAM_ACCESS_TOKEN)
         """
-        self.token = token or os.getenv("FINAM_TOKEN", "")
+        self.token = token or os.getenv("FINAM_ACCESS_TOKEN", "")
         if not self.token:
-            raise ValueError("FINAM_TOKEN не установлен в переменных окружения")
+            raise ValueError("FINAM_ACCESS_TOKEN не установлен в переменных окружения")
 
         # Инициализация TokenManager и Client
         self.token_manager = TokenManager(self.token)
@@ -252,9 +250,14 @@ class FinamAPIClientEnhanced:
         await self._ensure_initialized()
         try:
             orderbook = await self.client.instruments.get_order_book(symbol)
+
+            limited_orderbook = orderbook.model_copy(deep=True)
+            limited_orderbook.orderbook = limited_orderbook.orderbook.model_copy(deep=True)
+            limited_orderbook.orderbook.rows = limited_orderbook.orderbook.rows[:depth]
+
             return {
                 "status": "success",
-                "orderbook": orderbook,
+                "orderbook": limited_orderbook.model_dump(),
                 "symbol": symbol,
                 "depth": depth,
                 "message": "Стакан заявок получен успешно"
@@ -313,18 +316,18 @@ class FinamAPIClientEnhanced:
         """
         await self._ensure_initialized()
         try:
-            # Используем _exec_request для автоматического управления JWT токеном
-            # _exec_request уже добавляет /v1 префикс и возвращает (data, success)
-            result = await self.client.assets._exec_request(
-                method=self.client.assets.RequestMethod.GET,
-                url="/assets"
+            assets_payload = await self.client.assets.get_assets()
+            assets_payload = (
+                assets_payload.model_dump()
+                if hasattr(assets_payload, "model_dump")
+                else assets_payload
             )
 
-            # _exec_request возвращает кортеж (data, success)
-            assets_data = result[0] if isinstance(result, tuple) else result
-
-            # Извлекаем список активов из ответа
-            assets_list = assets_data.get("assets", []) if isinstance(assets_data, dict) else assets_data
+            assets_list = (
+                assets_payload.get("assets", [])
+                if isinstance(assets_payload, dict)
+                else assets_payload
+            )
 
             return {
                 "status": "success",

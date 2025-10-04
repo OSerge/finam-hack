@@ -52,37 +52,15 @@ poetry run python -m src.mcp_server.server
 
 ```bash
 # Finam API токен
-FINAM_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." # ПОМЕНЯТЬ НА РЕАЛЬНЫЙ
+FINAM_ACCESS_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." # ПОМЕНЯТЬ НА РЕАЛЬНЫЙ
 
 # Демо-аккаунт для тестов торговых операций
 FINAM_DEMO_ACCOUNT_ID="TRQD05:157..."
 ```
 
 **❗ Важно:**
-- Настоящий `FINAM_TOKEN` для всех тестов
+- Настоящий `FINAM_ACCESS_TOKEN` для всех тестов
 - Демо-аккаунт безопасен для тестирования торговли
 - Тесты автоматически пропускаются без токена
 
-## Структура теста
-
-```python
-async def test_example(mcp_client, real_finam_token):
-    """Тест API через Finam"""
-    result = await mcp_client.call_tool("get_finam_quotes", {"symbol": "SBER@MISX"})
-    print(f"\n✅ {result.data}")
-    assert "status" in result.data
-```
-
-Файл использует:
-- ✅ In-memory transport FastMCP для максимальной скорости
-- ✅ Реальные запросы к Finam API через MCP сервер
-- ✅ Простые ассерты на структуру ответа
-
-## Улучшение архитектуры
-
-В результате улучшений:
-- ✅ Максимальный coverage с минимальным, но читаемым кодом
-- ✅ Использование переменных окружения для демо-аккаунта
-- ✅ Простота отладки: единый набор тестов для всех инструментов
-- ✅ Максимальная гибкость без сложности, простота и эффективность
 

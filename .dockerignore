@@ -1,0 +1,32 @@
+# Игнорируем ненужные файлы для Docker сборки
+.git
+.gitignore
+README.md
+*.md
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Игнорируем всё кроме необходимых файлов для MCP сервера
+src/app/core/
+src/app/interfaces/
+src/mcp_server/tests/
+src/mcp_server/README.md
+
+# Игнорируем скрипты и другие файлы
+scripts/
+tests/
+case_baseline/

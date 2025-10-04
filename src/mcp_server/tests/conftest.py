@@ -21,7 +21,7 @@ async def mcp_client():
     Использует in-memory транспорт FastMCP - идеально для тестирования,
     так как не требует запуска отдельного процесса или сетевых соединений.
     
-    ВАЖНО: Использует РЕАЛЬНЫЙ FINAM_TOKEN из .env файла!
+    ВАЖНО: Использует РЕАЛЬНЫЙ FINAM_ACCESS_TOKEN из .env файла!
     """
     client = Client(mcp)
     
@@ -32,11 +32,11 @@ async def mcp_client():
 @pytest.fixture
 def real_finam_token():
     """
-    Проверяет наличие реального FINAM_TOKEN
+    Проверяет наличие реального FINAM_ACCESS_TOKEN
     """
-    token = os.getenv("FINAM_TOKEN")
+    token = os.getenv("FINAM_ACCESS_TOKEN")
     if not token or token == "test_token_12345":
-        pytest.skip("FINAM_TOKEN не установлен в .env файле")
+        pytest.skip("FINAM_ACCESS_TOKEN не установлен в .env файле")
     return token
 
 
